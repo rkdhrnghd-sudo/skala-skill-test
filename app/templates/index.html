@@ -7,13 +7,65 @@
   <style>
     body { margin: 0; padding: 48px 16px; font-family: "Malgun Gothic", sans-serif; background: #f4f7f4; color: #1f2d24; }
     main { max-width: 480px; margin: 0 auto; }
+    form { display: flex; gap: 8px; }
+    input, button { padding: 12px; font: inherit; border: 1px solid #2f7d4f; border-radius: 8px; }
+    input { flex: 1; min-width: 0; }
+    button { background: #2f7d4f; color: #fff; cursor: pointer; }
+    button:disabled { opacity: .6; }
+    #result { margin-top: 24px; padding: 16px; background: #fff; border-radius: 8px; }
+    #result h2 { margin: 0; }
+    li { margin: 8px 0; }
+    small { color: #55645b; }
   </style>
 </head>
 <body>
   <main>
     <h1>분리배출 도우미</h1>
     <p>사진을 올리거나 이름을 적으면 분리배출 방법을 알려 드려요.</p>
-    <p>지금은 준비 중이에요.</p>
+    <form id="search">
+      <input id="name" aria-label="버릴 물건 이름" placeholder="예: 페트병" maxlength="50">
+      <button id="find">찾기</button>
+    </form>
+    <p><small>사진으로 찾기는 준비 중이에요.</small></p>
+    <p id="message" role="status"></p>
+    <section id="result" hidden>
+      <h2 id="guide-name"></h2>
+      <p id="guide-category"></p>
+      <ol id="guide-steps"></ol>
+      <small>지역마다 다를 수 있어요.<br>출처: <span id="guide-source"></span></small>
+    </section>
   </main>
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    $("search").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      $("result").hidden = true;
+      $("message").textContent = "찾는 중이에요.";
+      $("find").disabled = true;
+      try {
+        const res = await fetch("/api/guide?name=" + encodeURIComponent($("name").value));
+        const data = await res.json();
+        if (!res.ok) {
+          $("message").textContent = data.detail;
+          return;
+        }
+        $("guide-name").textContent = data.name;
+        $("guide-category").textContent = "분류: " + data.category;
+        $("guide-source").textContent = data.source;
+        $("guide-steps").replaceChildren(...data.steps.map((step) => {
+          const li = document.createElement("li");
+          li.textContent = step;
+          return li;
+        }));
+        $("message").textContent = "";
+        $("result").hidden = false;
+      } catch {
+        $("message").textContent = "연결하지 못했어요. 잠시 뒤 다시 해 주세요.";
+      } finally {
+        $("find").disabled = false;
+      }
+    });
+  </script>
 </body>
 </html>

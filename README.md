@@ -11,7 +11,8 @@
 | `GET /api/guide` | `?name=페트병` | `name`, `category`, `steps`(목록), `source` |
 | `POST /api/photo` | 사진 파일 `file` | 위와 같음 |
 
-`/api/...`는 아직 없음.
+`GET /api/guide`: 이름이 비면 400, 모르는 이름이면 404이고 `{"detail": "안내 문구"}`를 받음.
+`POST /api/photo`는 아직 없음.
 
 함수 (`app/ai.py`): `guide_by_name(name)`, `guide_by_photo(image)`
 
@@ -20,7 +21,7 @@
 | 파일 | 담당 |
 |---|---|
 | `app/main.py` | 백엔드 |
-| `app/ai.py` (아직 없음) | AI |
+| `app/ai.py` | AI |
 | `app/templates/` | 프론트엔드 |
 | `README.md` | 기획 |
 
