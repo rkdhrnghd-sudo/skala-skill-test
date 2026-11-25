@@ -1,0 +1,113 @@
+name: kind 배포 연습
+
+# AWS 없이 로봇 안의 작은 클러스터에서 배포, 고장, 되돌리기를 연습한다
+on:
+  push:
+    branches: [practice/kind]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  kind:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: 0 작은 클러스터 만들기
+        run: |
+          kind version
+          kind create cluster --name lab --wait 180s
+          kubectl get nodes
+          # 손님처럼 Service 주소로 20번 물어보고 같은 답끼리 센다
+          cat > /tmp/ask.sh <<'S'
+          NODE=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+          PORT=$(kubectl get svc hackathon-app -o jsonpath='{.spec.ports[0].nodePort}')
+          for _ in $(seq 1 20); do
+            H1=$(curl -s -m 5 "http://$NODE:$PORT/" | grep -o '<h1>[^<]*' | cut -c5-)
+            CODE=$(curl -s -m 5 -o /dev/null -w '%{http_code}' -G --data-urlencode 'name=페트병' "http://$NODE:$PORT/api/guide")
+            echo "화면 [$H1] 찾기 $CODE"
+          done | sort | uniq -c | awk '{$1=$1; print}'
+          S
+          # 물어본 답이 전부 기대와 같은지 본다: check.sh "단계" "기대하는 답"
+          cat > /tmp/check.sh <<'S'
+          OUT=$(bash /tmp/ask.sh); echo "$OUT"
+          echo "| $1 | $(echo "$OUT" | paste -sd '/' -) |" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$OUT" != "20 $2" ]; then echo "기대와 다름. 기대: 20 $2"; exit 1; fi
+          S
+          # 화면 제목에 버전을 붙여 포장하고 클러스터에 넣는다: pack.sh v2
+          cat > /tmp/pack.sh <<'S'
+          set -e
+          sed -i "s|<h1>분리배출 도우미[^<]*|<h1>분리배출 도우미 $1|" app/templates/index.html
+          grep -q "<h1>분리배출 도우미 $1<" app/templates/index.html
+          docker build -q -t "hackathon-app:$1" .
+          kind load docker-image "hackathon-app:$1" --name lab
+          S
+          { echo "## kind 배포 연습 결과"; echo "손님처럼 20번 물어본 답"; echo; echo "| 단계 | 답 |"; echo "|---|---|"; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 1 배포하기 (v1)
+        run: |
+          bash /tmp/pack.sh v1
+          sed -i "s|image: .*hackathon-app:.*|image: hackathon-app:v1|" k8s/deployment.yaml
+          kubectl apply -f k8s/
+          kubectl rollout status deployment/hackathon-app --timeout=180s
+          kubectl get deployment,pods,svc
+          sleep 3
+          bash /tmp/check.sh "1 배포 (v1)" "화면 [분리배출 도우미 v1] 찾기 200"
+
+      - name: 2 새 버전으로 바꾸기 (v2)
+        run: |
+          bash /tmp/pack.sh v2
+          kubectl set image deployment/hackathon-app app=hackathon-app:v2
+          kubectl rollout status deployment/hackathon-app --timeout=180s
+          sleep 3
+          bash /tmp/check.sh "2 새 버전 (v2)" "화면 [분리배출 도우미 v2] 찾기 200"
+
+      - name: 3 /health가 고장 난 버전 배포 (v3)
+        run: |
+          sed -i 's/return {"status": "ok"}/raise RuntimeError("일부러 고장")/' app/main.py
+          grep -q 'raise RuntimeError' app/main.py
+          bash /tmp/pack.sh v3
+          kubectl set image deployment/hackathon-app app=hackathon-app:v3
+          if kubectl rollout status deployment/hackathon-app --timeout=60s; then echo "고장이 잡히지 않음"; exit 1; fi
+          kubectl get pods -o custom-columns=NAME:.metadata.name,IMAGE:.spec.containers[0].image,READY:.status.containerStatuses[0].ready,RESTARTS:.status.containerStatuses[0].restartCount
+          BAD=$(kubectl get pods -o jsonpath='{range .items[*]}{.metadata.name} {.spec.containers[0].image}{"\n"}{end}' | awk '/:v3$/{print $1; exit}')
+          kubectl describe pod "$BAD" | grep -iE 'unhealthy|probe failed' | tail -3
+          bash /tmp/check.sh "3 /health 고장 (v3): 손님은 옛 버전" "화면 [분리배출 도우미 v2] 찾기 200"
+
+      - name: 4 되돌리기
+        run: |
+          kubectl rollout history deployment/hackathon-app
+          kubectl rollout undo deployment/hackathon-app
+          kubectl rollout status deployment/hackathon-app --timeout=180s
+          sleep 3
+          kubectl get pods -o custom-columns=NAME:.metadata.name,IMAGE:.spec.containers[0].image,READY:.status.containerStatuses[0].ready
+          test "$(kubectl get deployment hackathon-app -o jsonpath='{.spec.template.spec.containers[0].image}')" = "hackathon-app:v2"
+          bash /tmp/check.sh "4 되돌리기 (v2)" "화면 [분리배출 도우미 v2] 찾기 200"
+
+      - name: 5 /health는 되는데 찾기만 고장 난 버전 배포 (v4)
+        run: |
+          git checkout app/main.py
+          sed -i 's/result = guide_by_name(name)/raise RuntimeError("일부러 고장")/' app/main.py
+          grep -q 'raise RuntimeError' app/main.py
+          bash /tmp/pack.sh v4
+          kubectl set image deployment/hackathon-app app=hackathon-app:v4
+          kubectl rollout status deployment/hackathon-app --timeout=180s
+          sleep 3
+          bash /tmp/check.sh "5 찾기만 고장 (v4): 못 막고 손님에게 감" "화면 [분리배출 도우미 v4] 찾기 500"
+
+      - name: 6 되돌리기
+        run: |
+          kubectl rollout undo deployment/hackathon-app
+          kubectl rollout status deployment/hackathon-app --timeout=180s
+          sleep 3
+          test "$(kubectl get deployment hackathon-app -o jsonpath='{.spec.template.spec.containers[0].image}')" = "hackathon-app:v2"
+          bash /tmp/check.sh "6 되돌리기 (v2)" "화면 [분리배출 도우미 v2] 찾기 200"
+
+      - name: 실패하면 상태 보기
+        if: failure()
+        run: |
+          kubectl get pods,svc -o wide
+          kubectl logs -l app=hackathon-app --tail=20 --prefix
