@@ -1,0 +1,66 @@
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-main
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-northeast-2
+  ECR_REPOSITORY: hackathon-app
+  CLUSTER_NAME: hackathon-eks
+
+jobs:
+  check:
+    # AWS 준비가 끝나면 저장소 Variables 에 ENABLE_AWS_DEPLOY=yes 를 넣어 켠다
+    if: github.ref == 'refs/heads/main' && vars.ENABLE_AWS_DEPLOY == 'yes'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements-dev.txt
+      - run: pytest -q
+
+  deploy:
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # AWS 임시 로그인(OIDC)에 필요하다
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - name: AWS 임시 로그인 (OIDC)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: ECR 로그인
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - name: 포장해서 창고(ECR)로 보내기
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          IMAGE="$REGISTRY/$ECR_REPOSITORY:${GITHUB_SHA::7}"
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+      - name: EKS 연결
+        run: aws eks update-kubeconfig --region "$AWS_REGION" --name "$CLUSTER_NAME"
+      - name: 배포
+        run: |
+          sed -i "s|image: .*hackathon-app:.*|image: $IMAGE|" k8s/deployment.yaml
+          kubectl apply -f k8s/
+          kubectl annotate deployment/hackathon-app kubernetes.io/change-cause="$GITHUB_SHA" --overwrite
+          kubectl rollout status deployment/hackathon-app --timeout=180s
+      - name: 주소 출력
+        run: kubectl get svc hackathon-app -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
