@@ -188,16 +188,3 @@ def guide_by_name(name):
         "steps": guide["steps"],
         "source": SOURCE,
     }
-
-
-def _name_from_photo(image):
-    # 연습용 가짜 답. 사진을 보지 않고 늘 같은 이름을 준다. AI 키가 생기면 이 함수를 진짜로 바꾼다.
-    return "투명 페트병"
-
-
-def guide_by_photo(image):
-    """사진(bytes)으로 분리배출 방법을 찾는다. 없으면 None. fake가 True면 가짜 답이다."""
-    guide = guide_by_name(_name_from_photo(image))
-    if guide is None:
-        return None
-    return {**guide, "fake": True}
