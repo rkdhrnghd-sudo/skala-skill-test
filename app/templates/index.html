@@ -7,7 +7,7 @@
   <style>
     body { margin: 0; padding: 48px 16px; font-family: "Malgun Gothic", sans-serif; background: #f4f7f4; color: #1f2d24; }
     main { max-width: 480px; margin: 0 auto; }
-    form { display: flex; gap: 8px; margin-bottom: 8px; }
+    form { display: flex; gap: 8px; }
     input, button { padding: 12px; font: inherit; border: 1px solid #2f7d4f; border-radius: 8px; }
     input { flex: 1; min-width: 0; }
     button { background: #2f7d4f; color: #fff; cursor: pointer; }
@@ -15,7 +15,6 @@
     #result { margin-top: 24px; padding: 16px; background: #fff; border-radius: 8px; }
     #result h2 { margin: 0; }
     li { margin: 8px 0; }
-    #guide-fake { padding: 8px 12px; background: #fff3cd; color: #664d03; border-radius: 8px; }
     small { color: #55645b; }
   </style>
 </head>
@@ -27,13 +26,9 @@
       <input id="name" aria-label="버릴 물건 이름" placeholder="예: 페트병" maxlength="50">
       <button id="find">찾기</button>
     </form>
-    <form id="photo-search">
-      <input id="photo" type="file" accept="image/jpeg,image/png,image/webp" aria-label="버릴 물건 사진">
-      <button id="photo-find">사진으로 찾기</button>
-    </form>
+    <p><small>사진으로 찾기는 준비 중이에요.</small></p>
     <p id="message" role="status"></p>
     <section id="result" hidden>
-      <p id="guide-fake" hidden>연습용 가짜 답이에요. 사진을 보고 찾은 답이 아니에요.</p>
       <h2 id="guide-name"></h2>
       <p id="guide-category"></p>
       <ol id="guide-steps"></ol>
@@ -43,18 +38,18 @@
   <script>
     const $ = (id) => document.getElementById(id);
 
-    async function find(url, options) {
+    $("search").addEventListener("submit", async (event) => {
+      event.preventDefault();
       $("result").hidden = true;
       $("message").textContent = "찾는 중이에요.";
-      $("find").disabled = $("photo-find").disabled = true;
+      $("find").disabled = true;
       try {
-        const res = await fetch(url, options);
+        const res = await fetch("/api/guide?name=" + encodeURIComponent($("name").value));
         const data = await res.json();
         if (!res.ok) {
           $("message").textContent = data.detail;
           return;
         }
-        $("guide-fake").hidden = !data.fake;
         $("guide-name").textContent = data.name;
         $("guide-category").textContent = "분류: " + data.category;
         $("guide-source").textContent = data.source;
@@ -68,20 +63,8 @@
       } catch {
         $("message").textContent = "연결하지 못했어요. 잠시 뒤 다시 해 주세요.";
       } finally {
-        $("find").disabled = $("photo-find").disabled = false;
+        $("find").disabled = false;
       }
-    }
-
-    $("search").addEventListener("submit", (event) => {
-      event.preventDefault();
-      find("/api/guide?name=" + encodeURIComponent($("name").value));
-    });
-
-    $("photo-search").addEventListener("submit", (event) => {
-      event.preventDefault();
-      const body = new FormData();
-      if ($("photo").files[0]) body.append("file", $("photo").files[0]);
-      find("/api/photo", { method: "POST", body });
     });
   </script>
 </body>
