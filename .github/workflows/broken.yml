@@ -1,0 +1,15 @@
+name: Broken on purpose
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  first:
+    runs_on: ubuntu-latest
+    steps:
+      - run: echo first
+  second:
+    runs-on: ubuntu-latest
+    needs: nothere
+    steps:
+      - run: echo "${{ github.event.pull_request.title }}"
