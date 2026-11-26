@@ -1,0 +1,29 @@
+name: act practice
+on:
+  pull_request:
+    branches: [main]
+    paths: [".github/workflows/act.yml"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  act:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download v0.2.97 -R nektos/act -p "act_Linux_x86_64.tar.gz" -O act.tar.gz
+          tar xzf act.tar.gz act
+          ./act -l
+      - name: 그대로 -> 초록
+        run: ./act pull_request -W .github/workflows/ci.yml -j test -P ubuntu-latest=catthehacker/ubuntu:act-latest
+      - name: 테스트 깨뜨림 -> 빨강이어야 함
+        run: |
+          sed -i 's/"ok"/"broken"/' tests/test_main.py
+          if ./act pull_request -W .github/workflows/ci.yml -j test -P ubuntu-latest=catthehacker/ubuntu:act-latest; then
+            echo "기대와 다름: 깨뜨렸는데 통과"; exit 1
+          fi
+          echo "act 에서도 빨간 결과 확인"
+          git checkout -- tests/test_main.py
